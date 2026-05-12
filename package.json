@@ -1,0 +1,20 @@
+{
+  "name": "@pipeworx/mcp-openstates",
+  "version": "0.1.0",
+  "description": "OpenStates MCP — bills, legislators, votes in all 50 US states",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "pipeworx", "openstates"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pipeworx-io/mcp-openstates"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
