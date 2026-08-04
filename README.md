@@ -1,14 +1,24 @@
-# mcp-openstates
+# @pipeworx/openstates
 
-OpenStates MCP — bills, legislators, votes in all 50 US states
+OpenStates v3 MCP — bills, legislators, votes in all 50 US states.
 
-Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 673+ live data sources.
+Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1394+ live data sources.
 
 ## Tools
 
-| Tool | Description |
-|------|-------------|
-| `get_legislator` | Fetch a single legislator by OpenStates person ID. Returns biographical info, current roles, prior offices, contact methods, sources. |
+- `search_bills(jurisdiction, query?, session?, classification?, sponsor?, sort?, per_page?, page?)`
+- `get_bill(openstates_id?, jurisdiction?, session?, identifier?)`
+- `search_legislators(jurisdiction?, name?, org_classification?, district?, party?, per_page?, page?)`
+- `get_legislator(person_id)`
+
+## Auth
+
+- **Platform key:** gateway env `PLATFORM_OPENSTATES_KEY`.
+- **BYO:** `?_apiKey=<key>` after registering at https://openstates.org/account/profile/ (free ~5,000 req/day).
+
+## Data source
+
+`https://v3.openstates.org` — header `X-API-KEY`.
 
 ## Quick Start
 
@@ -24,7 +34,7 @@ Add to your MCP client (Claude Desktop, Cursor, Windsurf, etc.):
 }
 ```
 
-Or connect to the full Pipeworx gateway for access to all 673+ data sources:
+Or connect to the full Pipeworx gateway for access to all 1394+ data sources:
 
 ```json
 {
@@ -48,7 +58,7 @@ The gateway picks the right tool and fills the arguments automatically.
 
 ## More
 
-- [All tools and guides](https://github.com/pipeworx-io/examples)
+- [Docs and guides](https://pipeworx.io/docs)
 - [pipeworx.io](https://pipeworx.io)
 
 ## License
