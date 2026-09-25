@@ -3,7 +3,7 @@
   "name": "io.github.pipeworx-io/openstates",
   "title": "Openstates",
   "description": "OpenStates MCP — bills, legislators, votes in all 50 US states",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "websiteUrl": "https://pipeworx.io/packs/openstates",
   "repository": {
     "url": "https://github.com/pipeworx-io/mcp-openstates",
