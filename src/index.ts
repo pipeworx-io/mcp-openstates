@@ -909,13 +909,19 @@ async function searchBills(apiKey: string, args: Record<string, unknown>) {
     bills: (data.results ?? []).map((b) => normalizeBill(b, false)),
   });
 
+  // Session ids are per-state (fleet #2465), so a zero under a session filter
+  // is as likely a wrong-shaped id as a genuine no-match. A year-shaped value
+  // is the common wrong shape: fetch the state's session list ALONGSIDE the
+  // search rather than after it, so the retry costs one extra round trip, not
+  // two — ask_pipeworx gives a leg ~13s and this upstream is slow.
+  const resolutionP: Promise<Settled> | null =
+    session && yearRangeOf(session) ? resolveSession(apiKey, jurisdiction, session).then(ok, fail) : null;
   const data = await osFetch<BillsPage>(apiKey, '/bills', params);
   if (!session || (data.results?.length ?? 0) > 0) return shape(data);
 
-  // Zero rows WITH a session filter: session ids are per-state (fleet #2465),
-  // so a zero here is as likely a wrong-shaped id as a genuine no-match. Check
-  // it against the state's own session list before reporting an empty result.
-  const resolution = await resolveSession(apiKey, jurisdiction, session);
+  const settled = resolutionP ? await resolutionP : await resolveSession(apiKey, jurisdiction, session).then(ok, fail);
+  if ('error' in settled) throw settled.error;
+  const resolution = settled.value;
   if (resolution.exact) return shape(data, { session_checked: resolution.exact });
 
   let last = data;
@@ -933,6 +939,11 @@ async function searchBills(apiKey: string, args: Record<string, unknown>) {
     session_resolved: sessionNote(session, tried.identifier, tried.name, resolution.candidates),
   });
 }
+
+type Resolution = { exact?: string; candidates: OsSession[] };
+type Settled = { value: Resolution } | { error: unknown };
+const ok = (value: Resolution): Settled => ({ value });
+const fail = (error: unknown): Settled => ({ error });
 
 function sessionNote(requested: string, used: string, name: string | undefined, candidates: OsSession[]) {
   return {
@@ -1009,11 +1020,12 @@ export function resolveSessionCandidates(requested: string, sessions: OsSession[
     .slice(0, 4);
 }
 
-// OpenStates does not always populate `classification` (Texas leaves it off and
-// names its specials "…Called Session"), so read the name too — otherwise the
-// newest special session outranks the regular one for the same year.
+// Otherwise the newest special session outranks the regular one for the same
+// year ("2025" in Texas picked "892" over "89R").
+// Live Texas marks its called sessions `primary` too, so the name is the
+// signal that actually separates them; `classification` only adds to it.
 function isSpecialSession(s: OsSession): boolean {
-  if (s.classification) return s.classification !== 'primary';
+  if (s.classification === 'special') return true;
   return /\b(special|called|extraordinary|extra)\b/i.test(s.name ?? '');
 }
 
@@ -1085,7 +1097,9 @@ async function resolveSession(
 
 async function getBill(apiKey: string, args: Record<string, unknown>) {
   const id = (args.openstates_id as string | undefined)?.trim();
-  const params = new URLSearchParams({ include: 'sponsorships,actions,votes,versions,sources,abstracts' });
+  // v3 takes `include` REPEATED; a comma-joined value is a 422 on every call.
+  const params = new URLSearchParams();
+  for (const inc of ['sponsorships', 'actions', 'votes', 'versions', 'sources', 'abstracts']) params.append('include', inc);
 
   if (id) {
     const data = await osFetch<OsBill>(apiKey, `/bills/${encodeURIComponent(id)}`, params);
