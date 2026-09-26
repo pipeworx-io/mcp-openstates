@@ -1,6 +1,6 @@
 {
   "name": "@pipeworx/mcp-openstates",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "OpenStates MCP — bills, legislators, votes in all 50 US states",
   "type": "module",
   "main": "src/index.ts",
@@ -26,7 +26,7 @@
     "@cloudflare/workers-types": "^4.20260405.1"
   },
   "pipeworx": {
-    "sourceHash": "v1-cb3703013cf69fc6e2fc70bca57a6857b7ead99de0e71beaa6a32b1312e11733",
-    "sourceCommit": "c7cc6672266b20d1b5feb0c4c2d631e50ad8ba17"
+    "sourceHash": "v1-d9939703c0e177f41da0fbd131835af380ebc15e9c75b8fd58b9dbebd35552be",
+    "sourceCommit": "69152ffc15233d5998bfe6fe195c040cdb328366"
   }
 }

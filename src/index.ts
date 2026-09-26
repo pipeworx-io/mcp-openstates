@@ -997,8 +997,8 @@ export function resolveSessionCandidates(requested: string, sessions: OsSession[
   return hits
     .map((s, i) => ({ s, i }))
     .sort((a, b) => {
-      const pa = a.s.classification === 'primary' ? 0 : 1;
-      const pb = b.s.classification === 'primary' ? 0 : 1;
+      const pa = isSpecialSession(a.s) ? 1 : 0;
+      const pb = isSpecialSession(b.s) ? 1 : 0;
       if (pa !== pb) return pa - pb;
       const da = a.s.start_date ?? '';
       const db = b.s.start_date ?? '';
@@ -1007,6 +1007,14 @@ export function resolveSessionCandidates(requested: string, sessions: OsSession[
     })
     .map((x) => x.s)
     .slice(0, 4);
+}
+
+// OpenStates does not always populate `classification` (Texas leaves it off and
+// names its specials "…Called Session"), so read the name too — otherwise the
+// newest special session outranks the regular one for the same year.
+function isSpecialSession(s: OsSession): boolean {
+  if (s.classification) return s.classification !== 'primary';
+  return /\b(special|called|extraordinary|extra)\b/i.test(s.name ?? '');
 }
 
 const TERRITORIES = new Set(['pr', 'gu', 'vi', 'as', 'mp']);
@@ -1021,6 +1029,25 @@ function jurisdictionPathId(jurisdiction: string): string {
   return j.startsWith('ocd-jurisdiction/') ? j : encodeURIComponent(j);
 }
 
+// Session lists change a few times a year; the upstream free tier is small and
+// per-minute throttled, so keep them per isolate for an hour rather than
+// spending a request on every zero-row search.
+const SESSION_TTL_MS = 60 * 60 * 1000;
+const sessionCache = new Map<string, { at: number; data: { name?: string; legislative_sessions?: OsSession[] } }>();
+
+async function jurisdictionSessions(apiKey: string, jurisdiction: string) {
+  const key = jurisdictionPathId(jurisdiction);
+  const hit = sessionCache.get(key);
+  if (hit && Date.now() - hit.at < SESSION_TTL_MS) return hit.data;
+  const data = await osFetch<{ name?: string; legislative_sessions?: OsSession[] }>(
+    apiKey,
+    `/jurisdictions/${key}`,
+    new URLSearchParams({ include: 'legislative_sessions' }),
+  );
+  sessionCache.set(key, { at: Date.now(), data });
+  return data;
+}
+
 /**
  * Check a session value against the jurisdiction's real session list.
  * exact → it IS a valid identifier (an empty result is genuine).
@@ -1033,11 +1060,7 @@ async function resolveSession(
   jurisdiction: string,
   session: string,
 ): Promise<{ exact?: string; candidates: OsSession[] }> {
-  const data = await osFetch<{ name?: string; legislative_sessions?: OsSession[] }>(
-    apiKey,
-    `/jurisdictions/${jurisdictionPathId(jurisdiction)}`,
-    new URLSearchParams({ include: 'legislative_sessions' }),
-  );
+  const data = await jurisdictionSessions(apiKey, jurisdiction);
   const sessions = (data.legislative_sessions ?? []).filter((s) => s && s.identifier);
   const norm = session.trim().toLowerCase();
   const exact = sessions.find(
