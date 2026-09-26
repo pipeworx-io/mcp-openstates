@@ -708,7 +708,11 @@ const tools: McpToolExport['tools'] = [
       properties: {
         jurisdiction: { type: 'string', description: '2-letter state code or jurisdiction name' },
         query: { type: 'string', description: 'Free-text search across title/summary' },
-        session: { type: 'string', description: 'Session identifier (e.g., "20232024")' },
+        session: {
+          type: 'string',
+          description:
+            'Optional. Session identifiers are PER STATE (Ohio "136", California "20252026", Texas "89"). Omit to search every session. A year or year range ("2025", "2025-2026") is resolved to the state\'s own session by date; an unknown session is refused with the valid list.',
+        },
         classification: { type: 'string', description: 'bill | resolution | constitutional amendment | etc.' },
         sponsor: { type: 'string', description: 'Legislator name filter' },
         sort: {
@@ -730,7 +734,11 @@ const tools: McpToolExport['tools'] = [
       properties: {
         openstates_id: { type: 'string', description: 'OpenStates bill ID (preferred, e.g., "ocd-bill/...")' },
         jurisdiction: { type: 'string', description: 'State code (use with session + identifier)' },
-        session: { type: 'string', description: 'Session ID (use with jurisdiction + identifier)' },
+        session: {
+          type: 'string',
+          description:
+            'Session ID, per state (Ohio "136", California "20252026"); a year or year range is resolved to the state\'s session. Use with jurisdiction + identifier.',
+        },
         identifier: { type: 'string', description: 'Bill identifier within the session (e.g., "AB-123")' },
       },
       required: [],
@@ -873,30 +881,183 @@ function normalizeBill(b: OsBill, full = false) {
   return base;
 }
 
+type BillsPage = {
+  results?: OsBill[];
+  pagination?: { total_items?: number; total_pages?: number; page?: number };
+};
+
 async function searchBills(apiKey: string, args: Record<string, unknown>) {
+  const jurisdiction = String(args.jurisdiction);
   const params = new URLSearchParams({
-    jurisdiction: String(args.jurisdiction),
+    jurisdiction,
     per_page: String(Math.min(50, Math.max(1, (args.per_page as number) ?? 20))),
     page: String(Math.max(1, (args.page as number) ?? 1)),
   });
   if (args.query) params.set('q', String(args.query));
-  if (args.session) params.set('session', String(args.session));
+  const session = typeof args.session === 'string' ? args.session.trim() : args.session ? String(args.session) : '';
+  if (session) params.set('session', session);
   if (args.classification) params.set('classification', String(args.classification));
   if (args.sponsor) params.set('sponsor', String(args.sponsor));
   if (args.sort) params.set('sort', String(args.sort));
 
-  const data = await osFetch<{
-    results?: OsBill[];
-    pagination?: { total_items?: number; total_pages?: number; page?: number };
-  }>(apiKey, '/bills', params);
-
-  return {
+  const shape = (data: BillsPage, extra: Record<string, unknown> = {}) => ({
     total: data.pagination?.total_items ?? 0,
     page: data.pagination?.page ?? null,
     total_pages: data.pagination?.total_pages ?? null,
     returned: data.results?.length ?? 0,
+    ...extra,
     bills: (data.results ?? []).map((b) => normalizeBill(b, false)),
+  });
+
+  const data = await osFetch<BillsPage>(apiKey, '/bills', params);
+  if (!session || (data.results?.length ?? 0) > 0) return shape(data);
+
+  // Zero rows WITH a session filter: session ids are per-state (fleet #2465),
+  // so a zero here is as likely a wrong-shaped id as a genuine no-match. Check
+  // it against the state's own session list before reporting an empty result.
+  const resolution = await resolveSession(apiKey, jurisdiction, session);
+  if (resolution.exact) return shape(data, { session_checked: resolution.exact });
+
+  let last = data;
+  for (const cand of resolution.candidates) {
+    params.set('session', cand.identifier);
+    last = await osFetch<BillsPage>(apiKey, '/bills', params);
+    if ((last.results?.length ?? 0) > 0) {
+      return shape(last, {
+        session_resolved: sessionNote(session, cand.identifier, cand.name, resolution.candidates),
+      });
+    }
+  }
+  const tried = resolution.candidates[resolution.candidates.length - 1];
+  return shape(last, {
+    session_resolved: sessionNote(session, tried.identifier, tried.name, resolution.candidates),
+  });
+}
+
+function sessionNote(requested: string, used: string, name: string | undefined, candidates: OsSession[]) {
+  return {
+    requested,
+    used,
+    name: name ?? null,
+    candidates: candidates.map((c) => c.identifier),
+    note: `"${requested}" is not a session identifier in this state; searched session "${used}"${name ? ` (${name})` : ''}, whose dates cover it.`,
   };
+}
+
+interface OsSession {
+  identifier: string;
+  name?: string;
+  classification?: string;
+  start_date?: string;
+  end_date?: string;
+}
+
+/**
+ * Years named by a session-ish string: "20252026", "2025-2026", "2025–26",
+ * "2025". Null when the value is not year-shaped (e.g. Ohio's "136").
+ */
+export function yearRangeOf(raw: string): [number, number] | null {
+  const s = raw.trim();
+  let m = s.match(/^((?:19|20)\d{2})((?:19|20)\d{2})$/);
+  if (m) return order(+m[1], +m[2]);
+  m = s.match(/^((?:19|20)\d{2})\s*[-\u2013\u2014/ ]\s*(\d{2}|\d{4})\b/);
+  if (m) {
+    const a = +m[1];
+    const b = m[2].length === 2 ? Math.floor(a / 100) * 100 + +m[2] : +m[2];
+    return order(a, b);
+  }
+  m = s.match(/^((?:19|20)\d{2})\b/);
+  if (m) return [+m[1], +m[1]];
+  return null;
+}
+
+function order(a: number, b: number): [number, number] {
+  return a <= b ? [a, b] : [b, a];
+}
+
+function sessionYears(s: OsSession): [number, number] | null {
+  const start = parseInt((s.start_date ?? '').slice(0, 4), 10);
+  const end = parseInt((s.end_date ?? '').slice(0, 4), 10);
+  if (Number.isFinite(start)) {
+    // An open end_date means the session is still running.
+    return [start, Number.isFinite(end) ? end : Math.max(start, new Date().getUTCFullYear())];
+  }
+  // No dates published: fall back to years named in the identifier or name.
+  return yearRangeOf(s.identifier) ?? yearRangeOf((s.name ?? '').replace(/^.*?\b((?:19|20)\d{2})/, '$1'));
+}
+
+/** Sessions whose date span overlaps the requested years, regular sessions first, newest first. */
+export function resolveSessionCandidates(requested: string, sessions: OsSession[]): OsSession[] {
+  const want = yearRangeOf(requested);
+  if (!want) return [];
+  const hits = sessions.filter((s) => {
+    const span = sessionYears(s);
+    return span !== null && span[0] <= want[1] && span[1] >= want[0];
+  });
+  return hits
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => {
+      const pa = a.s.classification === 'primary' ? 0 : 1;
+      const pb = b.s.classification === 'primary' ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      const da = a.s.start_date ?? '';
+      const db = b.s.start_date ?? '';
+      if (da !== db) return da < db ? 1 : -1;
+      return a.i - b.i;
+    })
+    .map((x) => x.s)
+    .slice(0, 4);
+}
+
+const TERRITORIES = new Set(['pr', 'gu', 'vi', 'as', 'mp']);
+
+function jurisdictionPathId(jurisdiction: string): string {
+  const j = jurisdiction.trim();
+  if (/^[A-Za-z]{2}$/.test(j)) {
+    const abbr = j.toLowerCase();
+    const kind = abbr === 'dc' ? 'district' : TERRITORIES.has(abbr) ? 'territory' : 'state';
+    return `ocd-jurisdiction/country:us/${kind}:${abbr}/government`;
+  }
+  return j.startsWith('ocd-jurisdiction/') ? j : encodeURIComponent(j);
+}
+
+/**
+ * Check a session value against the jurisdiction's real session list.
+ * exact → it IS a valid identifier (an empty result is genuine).
+ * candidates → year-shaped value mapped by date overlap.
+ * Neither → throws, naming the valid identifiers, so a wrong id can never
+ * masquerade as "no bills".
+ */
+async function resolveSession(
+  apiKey: string,
+  jurisdiction: string,
+  session: string,
+): Promise<{ exact?: string; candidates: OsSession[] }> {
+  const data = await osFetch<{ name?: string; legislative_sessions?: OsSession[] }>(
+    apiKey,
+    `/jurisdictions/${jurisdictionPathId(jurisdiction)}`,
+    new URLSearchParams({ include: 'legislative_sessions' }),
+  );
+  const sessions = (data.legislative_sessions ?? []).filter((s) => s && s.identifier);
+  const norm = session.trim().toLowerCase();
+  const exact = sessions.find(
+    (s) => s.identifier.toLowerCase() === norm || (s.name ?? '').trim().toLowerCase() === norm,
+  );
+  if (exact) {
+    if (exact.identifier === session) return { exact: exact.identifier, candidates: [] };
+    return { candidates: [exact] };
+  }
+  const candidates = resolveSessionCandidates(session, sessions);
+  if (candidates.length) return { candidates };
+
+  const recent = [...sessions]
+    .sort((a, b) => ((a.start_date ?? '') < (b.start_date ?? '') ? 1 : -1))
+    .slice(0, 8)
+    .map((s) => `"${s.identifier}"${s.name ? ` (${s.name})` : ''}`);
+  throw new Error(
+    `user_error: "${session}" is not a session in ${data.name ?? jurisdiction}. Session identifiers differ by state. ` +
+      `Valid recent sessions: ${recent.join(', ') || 'none published'}. Omit session to search all sessions.`,
+  );
 }
 
 async function getBill(apiKey: string, args: Record<string, unknown>) {
@@ -913,12 +1074,30 @@ async function getBill(apiKey: string, args: Record<string, unknown>) {
   if (!jurisdiction || !session || !identifier) {
     throw new Error('Pass either openstates_id, OR all three of jurisdiction + session + identifier.');
   }
-  const data = await osFetch<OsBill>(
-    apiKey,
-    `/bills/${encodeURIComponent(jurisdiction)}/${encodeURIComponent(session)}/${encodeURIComponent(identifier)}`,
-    params,
-  );
-  return normalizeBill(data, true);
+  const byTriple = (sess: string) =>
+    osFetch<OsBill>(
+      apiKey,
+      `/bills/${encodeURIComponent(jurisdiction)}/${encodeURIComponent(sess)}/${encodeURIComponent(identifier)}`,
+      params,
+    );
+  try {
+    return normalizeBill(await byTriple(session), true);
+  } catch (err) {
+    if (!/HTTP 404/.test(String((err as Error)?.message))) throw err;
+    // Session ids are per-state (fleet #2465): map a year-shaped value onto the
+    // state's own session before calling the bill missing.
+    const resolution = await resolveSession(apiKey, jurisdiction, session);
+    if (resolution.exact) throw err;
+    for (const cand of resolution.candidates) {
+      try {
+        const bill = normalizeBill(await byTriple(cand.identifier), true);
+        return { ...bill, session_resolved: sessionNote(session, cand.identifier, cand.name, resolution.candidates) };
+      } catch (e) {
+        if (!/HTTP 404/.test(String((e as Error)?.message))) throw e;
+      }
+    }
+    throw err;
+  }
 }
 
 interface OsPerson {
