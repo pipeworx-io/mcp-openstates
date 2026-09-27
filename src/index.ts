@@ -702,7 +702,7 @@ const tools: McpToolExport['tools'] = [
   {
     name: 'search_bills',
     description:
-      'Search bills in any US statehouse. Pass jurisdiction as a 2-letter state code (e.g., "CA", "NY", "TX") or full name. Returns bill identifiers, titles, classifications, last action, sponsors, and OpenStates IDs for use with get_bill.',
+      'Open States (Plural) — search bills in any one US state legislature. Pass jurisdiction as a 2-letter state code (e.g., "CA", "NY", "TX") or full name. Returns bill identifiers, titles, classifications, last action, sponsors, and Open States IDs for use with get_bill. Prefer for a single state\'s bills with their sponsors; LegiScan is the full-text search across every state and Congress.',
     inputSchema: {
       type: 'object',
       properties: {
