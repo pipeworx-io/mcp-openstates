@@ -719,7 +719,7 @@ const tools: McpToolExport['tools'] = [
           type: 'string',
           description: 'updated_desc | updated_asc | first_action_desc | first_action_asc | latest_action_desc | latest_action_asc',
         },
-        per_page: { type: 'number', description: '1-50 (default 20)' },
+        per_page: { type: 'number', description: '1-20 (default 20) — OpenStates rejects anything above 20 with a 400; a higher value is clamped to 20 and the response says so. Use `page` for more results.' },
         page: { type: 'number', description: '1-based page (default 1)' },
       },
       required: ['jurisdiction'],
@@ -756,7 +756,7 @@ const tools: McpToolExport['tools'] = [
         org_classification: { type: 'string', description: 'upper | lower | legislature' },
         district: { type: 'string', description: 'District identifier' },
         party: { type: 'string', description: 'Party name (e.g., "Democratic", "Republican")' },
-        per_page: { type: 'number', description: '1-50 (default 20)' },
+        per_page: { type: 'number', description: '1-20 (default 20) — OpenStates rejects anything above 20 with a 400; a higher value is clamped to 20 and the response says so. Use `page` for more results.' },
         page: { type: 'number', description: '1-based page' },
       },
       required: [],
@@ -817,6 +817,33 @@ async function osFetch<T>(apiKey: string, path: string, params: URLSearchParams)
     throw new Error(`OpenStates error: ${res.status} ${body.slice(0, 200)}`);
   }
   return res.json() as Promise<T>;
+}
+
+// OpenStates rejects per_page outside [1, 20] with a 400 — NOT 50, despite
+// what this pack's own schema used to say (fleet #3157, verified live:
+// {"detail":"invalid per_page, must be in [1, 20]"}). A model that trusted
+// the old 1-50 schema got the 400 twice and gave up on the caller's question
+// (a LOUD failure that still ends it). Clamp to the real upstream limit and
+// say so when the caller asked for more, so a smaller page isn't mistaken
+// for a smaller result set — `page` is how a caller walks further pages of
+// the same size, and the pack already threads it through untouched.
+const OPENSTATES_MAX_PER_PAGE = 20;
+
+function clampPerPage(requested: unknown): { per_page: number; capped_from: number | null } {
+  const n = typeof requested === 'number' && requested > 0 ? Math.trunc(requested) : 20;
+  const per_page = Math.min(OPENSTATES_MAX_PER_PAGE, Math.max(1, n));
+  return { per_page, capped_from: n > OPENSTATES_MAX_PER_PAGE ? n : null };
+}
+
+function perPageCapNote(capped_from: number | null): Record<string, unknown> {
+  if (capped_from === null) return {};
+  return {
+    per_page_capped: {
+      requested: capped_from,
+      used: OPENSTATES_MAX_PER_PAGE,
+      note: `OpenStates allows at most ${OPENSTATES_MAX_PER_PAGE} results per page (its API rejects more with a 400) — pass page:2, page:3, ... for the rest.`,
+    },
+  };
 }
 
 interface OsBill {
@@ -888,9 +915,10 @@ type BillsPage = {
 
 async function searchBills(apiKey: string, args: Record<string, unknown>) {
   const jurisdiction = String(args.jurisdiction);
+  const { per_page, capped_from } = clampPerPage(args.per_page);
   const params = new URLSearchParams({
     jurisdiction,
-    per_page: String(Math.min(50, Math.max(1, (args.per_page as number) ?? 20))),
+    per_page: String(per_page),
     page: String(Math.max(1, (args.page as number) ?? 1)),
   });
   if (args.query) params.set('q', String(args.query));
@@ -904,6 +932,8 @@ async function searchBills(apiKey: string, args: Record<string, unknown>) {
     total: data.pagination?.total_items ?? 0,
     page: data.pagination?.page ?? null,
     total_pages: data.pagination?.total_pages ?? null,
+    per_page_used: per_page,
+    ...perPageCapNote(capped_from),
     returned: data.results?.length ?? 0,
     ...extra,
     bills: (data.results ?? []).map((b) => normalizeBill(b, false)),
@@ -1191,8 +1221,9 @@ function normalizeLegislator(p: OsPerson, full = false) {
 }
 
 async function searchLegislators(apiKey: string, args: Record<string, unknown>) {
+  const { per_page, capped_from } = clampPerPage(args.per_page);
   const params = new URLSearchParams({
-    per_page: String(Math.min(50, Math.max(1, (args.per_page as number) ?? 20))),
+    per_page: String(per_page),
     page: String(Math.max(1, (args.page as number) ?? 1)),
   });
   if (args.jurisdiction) params.set('jurisdiction', String(args.jurisdiction));
@@ -1210,6 +1241,8 @@ async function searchLegislators(apiKey: string, args: Record<string, unknown>) 
     total: data.pagination?.total_items ?? 0,
     page: data.pagination?.page ?? null,
     total_pages: data.pagination?.total_pages ?? null,
+    per_page_used: per_page,
+    ...perPageCapNote(capped_from),
     returned: data.results?.length ?? 0,
     legislators: (data.results ?? []).map((p) => normalizeLegislator(p, false)),
   };
