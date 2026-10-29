@@ -1,12 +1,20 @@
 {
   "name": "@pipeworx/mcp-openstates",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "OpenStates MCP — bills, legislators, votes in all 50 US states",
   "type": "module",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./tools.json": "./tools.json",
+    "./package.json": "./package.json"
+  },
   "bin": {
     "mcp-openstates": "bin/cli.js"
+  },
+  "files": ["bin/", "lib/", "tools.json", "server.json"],
+  "engines": {
+    "node": ">=18"
   },
   "keywords": ["mcp", "mcp-server", "model-context-protocol", "pipeworx", "openstates"],
   "license": "MIT",
@@ -14,19 +22,12 @@
     "type": "git",
     "url": "git+https://github.com/pipeworx-io/mcp-openstates.git"
   },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "tsx": "^4.19.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.9.3",
-    "@cloudflare/workers-types": "^4.20260405.1"
-  },
+  "mcpName": "io.github.pipeworx-io/openstates",
   "pipeworx": {
-    "sourceHash": "v1-c87377cdbf7003d586ccbea001ccb33972fb766a6de5e6e8bf848e10fe115e71",
-    "sourceCommit": "f54ad77e789f27fe393978f9c080b5b18c87bb4f"
+    "mode": "gateway",
+    "slug": "openstates",
+    "gatewaySlug": "openstates",
+    "sourceHash": "v1-d1f4c8cf89e5aa73c6fc92bd15b90f93a178968a50848839c9779fcbe0956cc8",
+    "sourceCommit": "b2c4383545bb35171d0ada2beb1c9c7168ea175e"
   }
 }
