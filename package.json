@@ -1,6 +1,6 @@
 {
   "name": "@pipeworx/mcp-openstates",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "OpenStates MCP — bills, legislators, votes in all 50 US states",
   "type": "module",
   "main": "lib/index.js",
@@ -27,7 +27,7 @@
     "mode": "gateway",
     "slug": "openstates",
     "gatewaySlug": "openstates",
-    "sourceHash": "v1-d1f4c8cf89e5aa73c6fc92bd15b90f93a178968a50848839c9779fcbe0956cc8",
-    "sourceCommit": "b2c4383545bb35171d0ada2beb1c9c7168ea175e"
+    "sourceHash": "v1-f76c9d6da8bb782283e7ec1c13486bec5a0258f6f1db5fecbff9421d96e4a297",
+    "sourceCommit": "243a06a6ca2d3b6075325f3b66a1468d0a2eb603"
   }
 }
